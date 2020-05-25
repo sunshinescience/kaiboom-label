@@ -7,14 +7,21 @@ import sys
 from PySide2 import QtCore, QtWidgets, QtGui
 
 
+class Labels:
+    names = ["clubhead", "shaftcenter"]
+
+    def __init__(self):
+        pass
+
 class LabeledImage(QtWidgets.QWidget):
     def __init__(self, img_path):
         super().__init__()
-        self.image(img_path)
+        self.new(img_path)
     
-    def image(self, img_path):
+    def new(self, img_path):
         self.pixmap = QtGui.QPixmap(str(img_path))
         self.setGeometry(self.pixmap.rect())
+        self.labels = Labels()
 
     def paintEvent(self, event):
         painter = QtGui.QPainter(self)        
@@ -34,8 +41,8 @@ class LabelWidget(QtWidgets.QWidget):
 
         # elements
         self.next_button = QtWidgets.QPushButton("next")
-        self.shaft_button = QtWidgets.QRadioButton("shaft")  # center of shaft
-        self.head_button = QtWidgets.QRadioButton("head")   # club head
+        self.shaft_button = QtWidgets.QRadioButton("shaftcenter")
+        self.head_button = QtWidgets.QRadioButton("clubhead")
         self.shaft_button.setChecked(True)
         self.image_widget = LabeledImage(next(self.image_iter))
 
@@ -62,24 +69,24 @@ class LabelWidget(QtWidgets.QWidget):
     def apply_click(self, x, y):
         xy = (x, y)
         if self.shaft_button.isChecked():
-            print(f"shaft: {xy}")
+            print(f"{self.shaft_button.text()}: {xy}")
         elif self.head_button.isChecked():
-            print(f"head: {xy}")
+            print(f"{self.head_button.text()}: {xy}")
         else:
             raise NotImplementedError("New keypoint type button?")
     
     def adjust_size(self):
         self.image_widget.update()
         image_rect = self.image_widget.rect()
-        self_width_min = image_rect.width() * 1.1
-        self_height_min = image_rect.height() * 1.1
+        self_width_min = image_rect.width() + 45
+        self_height_min = image_rect.height() + 45
         self_rect = self.rect()
         self_rect.setWidth(max(self_width_min, self_rect.width()))
         self_rect.setHeight(max(self_height_min, self_rect.height()))
         self.setGeometry(self_rect)
 
     def next_image(self):
-        self.image_widget.image(next(self.image_iter))
+        self.image_widget.new(next(self.image_iter))
         self.adjust_size()
         self.shaft_button.setChecked(True)
 
