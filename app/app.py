@@ -1,34 +1,73 @@
 #!/usr/bin/env python3
 import collections
 import glob
+import logging
 from pathlib import Path
 import sys
 
 from PySide2 import QtCore, QtWidgets, QtGui
 
+logger = logging.getLogger("app")
+logging.basicConfig(level=logging.INFO)
+
+KeypointPosition = collections.namedtuple("KeypointPosition", "x y")
+
 
 class Labels:
-    names = ["clubhead", "shaftcenter"]
+    keypoints = {
+        "clubhead": {"color": QtGui.QColor(255, 0, 0, 127), "short": "CH"}, 
+        "shaftcenter": {"color": QtGui.QColor(0, 0, 255, 127), "short": "SC"}, 
+    }
+    names = list(keypoints.keys())
 
     def __init__(self):
-        pass
+        self.labels = {}
+    
+    def __len__(self):
+        return len(self.labels)
+
+    def items(self):
+        return self.labels.items()
+    
+    def __setitem__(self, name, pos):
+        logger.info(f"Label name={name} set to pos={pos}.")
+        assert name in self.names, name
+        self.labels[name] = pos
+    
+    def clear(self):
+        self.labels.clear()
+    
+    def to_json(self):
+        return {n: [p.x, p.y] for n, p in self.items()}
+
 
 class LabeledImage(QtWidgets.QWidget):
     def __init__(self, img_path):
         super().__init__()
+        self.pen = QtGui.QPen()
+        self.pen.setWidth(3)
+        self.r = 10
         self.new(img_path)
     
     def new(self, img_path):
         self.pixmap = QtGui.QPixmap(str(img_path))
-        self.setGeometry(self.pixmap.rect())
+        self.setGeometry(self.image_rect)
         self.labels = Labels()
+        
+    @property
+    def image_rect(self):
+        return self.pixmap.rect()
 
     def paintEvent(self, event):
         painter = QtGui.QPainter(self)        
         painter.drawPixmap(self.rect(), self.pixmap)
-        #pen = QPen(Qt.red, 3)
-        #painter.setPen(pen)
-        #painter.drawLine(10, 10, self.rect().width() -10 , 10)
+        
+        for n, p in self.labels.items():
+            self.pen.setColor(self.labels.keypoints[n]["color"])
+            painter.setPen(self.pen)
+            point = QtCore.QPoint(*p)
+            painter.drawEllipse(point, self.r, self.r)
+            painter.drawText(point, self.labels.keypoints[n]["short"])
 
 
 class LabelWidget(QtWidgets.QWidget):
@@ -36,48 +75,61 @@ class LabelWidget(QtWidgets.QWidget):
         super().__init__()
 
         # data
+        self.labels = {}
         self.image_list = img_dir.glob("*.png")
         self.image_iter = iter(self.image_list)
+        self.current_image_path = None
 
         # elements
+        self.clear_button = QtWidgets.QPushButton("clear")
         self.next_button = QtWidgets.QPushButton("next")
-        self.shaft_button = QtWidgets.QRadioButton("shaftcenter")
-        self.head_button = QtWidgets.QRadioButton("clubhead")
-        self.shaft_button.setChecked(True)
-        self.image_widget = LabeledImage(next(self.image_iter))
+        self.keypoint_buttons = [QtWidgets.QRadioButton(n) for n in Labels.names]
+        self.image_widget = None
+        self.next_image()
 
         # layout
         self.layout = QtWidgets.QVBoxLayout()
         self.layout.addWidget(self.image_widget)
         hbox = QtWidgets.QHBoxLayout()
-        hbox.addWidget(self.shaft_button)
-        hbox.addWidget(self.head_button)
+        for b in self.keypoint_buttons:
+            hbox.addWidget(b)
         hbox.addWidget(self.next_button)
+        hbox.addWidget(self.clear_button)
         self.layout.addLayout(hbox)
         self.setLayout(self.layout)
-        self.adjust_size()
 
         # interactions
+        self.clear_button.clicked.connect(self.clear)
         self.next_button.clicked.connect(self.next_image)
         self.image_widget.mousePressEvent = self.image_click
     
+    def select_next_kpt_button(self):
+        inext = None
+        for i, b in enumerate(self.keypoint_buttons):
+            if b.isChecked():
+                inext = i + 1
+                if inext == len(self.keypoint_buttons):
+                    inext = 0
+        self.keypoint_buttons[inext].setChecked(True)
+
     def image_click(self, event):
         x = event.pos().x()
         y = event.pos().y()
-        self.apply_click(x, y)
+        pos = KeypointPosition(x, y)    
+        for b in self.keypoint_buttons:
+            if b.isChecked():
+                self.image_widget.labels[b.text()] = pos
+        self.update_image_widget()
+        self.select_next_kpt_button()
     
-    def apply_click(self, x, y):
-        xy = (x, y)
-        if self.shaft_button.isChecked():
-            print(f"{self.shaft_button.text()}: {xy}")
-        elif self.head_button.isChecked():
-            print(f"{self.head_button.text()}: {xy}")
-        else:
-            raise NotImplementedError("New keypoint type button?")
+    def clear(self):
+        self.image_widget.labels.clear()
+        self.update_image_widget()
+        self.keypoint_buttons[0].setChecked(True)
     
-    def adjust_size(self):
+    def update_image_widget(self):
         self.image_widget.update()
-        image_rect = self.image_widget.rect()
+        image_rect = self.image_widget.image_rect
         self_width_min = image_rect.width() + 45
         self_height_min = image_rect.height() + 45
         self_rect = self.rect()
@@ -86,14 +138,22 @@ class LabelWidget(QtWidgets.QWidget):
         self.setGeometry(self_rect)
 
     def next_image(self):
-        self.image_widget.new(next(self.image_iter))
-        self.adjust_size()
-        self.shaft_button.setChecked(True)
+        if self.current_image_path is not None:
+            num_labels = len(self.image_widget.labels)
+            if num_labels > 0:
+                logger.info(f"Adding {num_labels} labels for {self.current_image_path} to cache.")
+                self.labels[self.current_image_path] = self.image_widget.labels
+        self.current_image_path = next(self.image_iter)
+        if self.image_widget is None:
+            self.image_widget = LabeledImage(self.current_image_path)
+        else:
+            self.image_widget.new(self.current_image_path)
+        self.update_image_widget()
+        self.keypoint_buttons[0].setChecked(True)
 
 
 def main():
     app = QtWidgets.QApplication([])
-
     img_dir = Path("/home/kaiboom/Pictures/golf")
     widget = LabelWidget(img_dir)
     widget.resize(800, 600)
