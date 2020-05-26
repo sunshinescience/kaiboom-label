@@ -10,13 +10,26 @@ from PySide2 import QtCore, QtWidgets, QtGui
 logger = logging.getLogger("app")
 logging.basicConfig(level=logging.INFO)
 
+
 KeypointPosition = collections.namedtuple("KeypointPosition", "x y")
 
 
-class Labels:
+class LabeledPerson:
     keypoints = {
         "clubhead": {"color": QtGui.QColor(255, 0, 0, 127), "short": "CH"}, 
         "shaftcenter": {"color": QtGui.QColor(0, 0, 255, 127), "short": "SC"}, 
+        "ball": {"color": QtGui.QColor(255, 255, 255, 127), "short": "B"}, 
+        "nose": {"color": QtGui.QColor(255, 128, 0, 127), "short": "N"}, 
+        "left_shoulder": {"color": QtGui.QColor(255, 255, 0, 127), "short": "LS"}, 
+        "right_shoulder": {"color": QtGui.QColor(255, 255, 0, 127), "short": "RS"}, 
+        "left_elbow": {"color": QtGui.QColor(0, 255, 255, 127), "short": "LE"}, 
+        "right_elbow": {"color": QtGui.QColor(0, 255, 255, 127), "short": "RE"}, 
+        "left_wrist": {"color": QtGui.QColor(255, 0, 255, 127), "short": "LW"}, 
+        "right_wrist": {"color": QtGui.QColor(255, 0, 255, 127), "short": "RW"}, 
+        "left_hip": {"color": QtGui.QColor(128, 128, 128, 127), "short": "LH"}, 
+        "right_hip": {"color": QtGui.QColor(128, 128, 128, 127), "short": "RH"}, 
+        "left_knee": {"color": QtGui.QColor(0, 0, 0, 127), "short": "LK"}, 
+        "right_knee": {"color": QtGui.QColor(0, 0, 0, 127), "short": "RK"}, 
     }
     names = list(keypoints.keys())
 
@@ -41,18 +54,49 @@ class Labels:
         return {n: [p.x, p.y] for n, p in self.items()}
 
 
+class Persons:
+    def __init__(self, labels=None):
+        self.labels = labels
+        if self.labels is None:
+            self.labels = []
+        self.active_person_idx = None
+        if len(self) > 0:
+            self.active_person_idx = 0
+    
+    def __len__(self):
+        return len(self.labels)        
+
+    def __iter__(self):
+        return iter(self.labels)
+    
+    def __getitem__(self, idx):
+        return self.labels[idx]
+
+    @property
+    def active_person(self):
+        if self.active_person_idx is None:
+            return None
+        return self.labels[self.active_person_idx]
+    
+    def new(self):
+        self.labels.append(LabeledPerson())
+        self.active_person_idx = len(self) - 1
+
+
 class LabeledImage(QtWidgets.QWidget):
-    def __init__(self, img_path):
+    def __init__(self, img_path, persons=None):
         super().__init__()
         self.pen = QtGui.QPen()
         self.pen.setWidth(3)
         self.r = 10
-        self.new(img_path)
+        self.new(img_path, persons)
     
-    def new(self, img_path):
+    def new(self, img_path, persons=None):
         self.pixmap = QtGui.QPixmap(str(img_path))
         self.setGeometry(self.image_rect)
-        self.labels = Labels()
+        self.persons = persons
+        if self.persons is None:
+            self.persons = Persons()
         
     @property
     def image_rect(self):
@@ -62,12 +106,15 @@ class LabeledImage(QtWidgets.QWidget):
         painter = QtGui.QPainter(self)        
         painter.drawPixmap(self.rect(), self.pixmap)
         
-        for n, p in self.labels.items():
-            self.pen.setColor(self.labels.keypoints[n]["color"])
-            painter.setPen(self.pen)
-            point = QtCore.QPoint(*p)
-            painter.drawEllipse(point, self.r, self.r)
-            painter.drawText(point, self.labels.keypoints[n]["short"])
+        for i, person in enumerate(self.persons):
+            for n, p in person.items():
+                self.pen.setColor(person.keypoints[n]["color"])
+                painter.setPen(self.pen)
+                point = QtCore.QPoint(*p)
+                painter.drawEllipse(point, self.r, self.r)
+                point.setX(point.x() + self.r)
+                point.setY(point.y() + self.r // 2)
+                painter.drawText(point, person.keypoints[n]["short"] + f"-{i}")
 
 
 class LabelWidget(QtWidgets.QWidget):
@@ -76,14 +123,16 @@ class LabelWidget(QtWidgets.QWidget):
 
         # data
         self.labels = {}
-        self.image_list = img_dir.glob("*.png")
-        self.image_iter = iter(self.image_list)
-        self.current_image_path = None
+        self.image_fpaths = list(img_dir.glob("*.png"))
+        self.current_image_idx = None
+        self.current_image_fpath = None
 
         # elements
         self.clear_button = QtWidgets.QPushButton("clear")
         self.next_button = QtWidgets.QPushButton("next")
-        self.keypoint_buttons = [QtWidgets.QRadioButton(n) for n in Labels.names]
+        self.back_button = QtWidgets.QPushButton("back")
+        self.keypoint_buttons = [QtWidgets.QRadioButton(n) for n in LabeledPerson.names]
+        self.person_selector = QtWidgets.QComboBox()
         self.image_widget = None
         self.next_image()
 
@@ -93,6 +142,8 @@ class LabelWidget(QtWidgets.QWidget):
         hbox = QtWidgets.QHBoxLayout()
         for b in self.keypoint_buttons:
             hbox.addWidget(b)
+        hbox.addWidget(self.person_selector)
+        hbox.addWidget(self.back_button)
         hbox.addWidget(self.next_button)
         hbox.addWidget(self.clear_button)
         self.layout.addLayout(hbox)
@@ -101,6 +152,7 @@ class LabelWidget(QtWidgets.QWidget):
         # interactions
         self.clear_button.clicked.connect(self.clear)
         self.next_button.clicked.connect(self.next_image)
+        self.back_button.clicked.connect(self.last_image)
         self.image_widget.mousePressEvent = self.image_click
     
     def select_next_kpt_button(self):
@@ -118,12 +170,12 @@ class LabelWidget(QtWidgets.QWidget):
         pos = KeypointPosition(x, y)    
         for b in self.keypoint_buttons:
             if b.isChecked():
-                self.image_widget.labels[b.text()] = pos
+                self.image_widget.persons.active_person[b.text()] = pos
         self.update_image_widget()
         self.select_next_kpt_button()
     
     def clear(self):
-        self.image_widget.labels.clear()
+        self.image_widget.persons.active_person.clear()
         self.update_image_widget()
         self.keypoint_buttons[0].setChecked(True)
     
@@ -137,19 +189,38 @@ class LabelWidget(QtWidgets.QWidget):
         self_rect.setHeight(max(self_height_min, self_rect.height()))
         self.setGeometry(self_rect)
 
-    def next_image(self):
-        if self.current_image_path is not None:
-            num_labels = len(self.image_widget.labels)
-            if num_labels > 0:
-                logger.info(f"Adding {num_labels} labels for {self.current_image_path} to cache.")
-                self.labels[self.current_image_path] = self.image_widget.labels
-        self.current_image_path = next(self.image_iter)
-        if self.image_widget is None:
-            self.image_widget = LabeledImage(self.current_image_path)
+    def jump_image(self, jump):
+        if self.current_image_fpath is not None:
+            labeled_persons = [p for p in self.image_widget.persons if len(p) > 0]
+            num_labeled_persons = len(labeled_persons)
+            if num_labeled_persons > 0:
+                logger.info(f"Adding {num_labeled_persons} labeled persons for {self.current_image_fpath} to cache.")
+                self.labels[self.current_image_fpath] = Persons(labeled_persons)
+        if self.current_image_idx is None:
+            self.current_image_idx = 0
         else:
-            self.image_widget.new(self.current_image_path)
+            self.current_image_idx += jump
+        self.current_image_fpath = self.image_fpaths[self.current_image_idx]
+        persons = self.labels.get(self.current_image_fpath)
+        if self.image_widget is None:
+            self.image_widget = LabeledImage(self.current_image_fpath, persons=persons)
+        else:
+            self.image_widget.new(self.current_image_fpath, persons=persons)
+        if len(self.image_widget.persons) < 1:
+            self.image_widget.persons.new()
+        self.person_selector.clear()
+        self.person_selector.addItems([str(i) for i in range(len(self.image_widget.persons))])
         self.update_image_widget()
         self.keypoint_buttons[0].setChecked(True)
+    
+    def next_image(self):
+        self.jump_image(1)
+    
+    def last_image(self):
+        if self.current_image_idx < 1 or self.current_image_idx is None:
+            logger.warning(f"current_image_idx={self.current_image_idx}, nothing to go back to")
+            return
+        self.jump_image(-1)
 
 
 def main():
