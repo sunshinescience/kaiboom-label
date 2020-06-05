@@ -32,8 +32,8 @@ class LabeledPerson:
         "right_hip",
         "left_knee",
         "right_knee",
-        "club_head",
-        "shaft_center",
+        "clubhead",
+        "shaftcenter",
         "ball"
     ]  # in order
     keypoints = {
@@ -80,7 +80,7 @@ class LabeledPerson:
     
     def to_arrays(self):
         """COCO style."""
-        num_kpts = len(self.names)
+        num_kpts = len(self.keypoint_names)
         v = np.zeros((num_kpts,), dtype=np.uint32)
         xy = np.zeros((num_kpts * 2,), dtype=np.uint32)
         for i, name in enumerate(self.keypoint_names):
@@ -227,6 +227,8 @@ class LabelWidget(QtWidgets.QWidget):
         self.json_button = QtWidgets.QPushButton("json")
         self.keypoint_buttons = [QtWidgets.QRadioButton(n) for n in LabeledPerson.names]
         self.person_selector = QtWidgets.QComboBox()
+        self.image_selector = QtWidgets.QComboBox()
+        self.image_selector.addItems([p.name for p in self.image_fpaths])
         self.image_widget = None
         self.next_image()
 
@@ -243,9 +245,11 @@ class LabelWidget(QtWidgets.QWidget):
         hbox.addWidget(self.back_button)
         hbox.addWidget(self.next_button)
         hbox.addWidget(self.save_button)
-        hbox.addWidget(self.clear_button)
-        hbox.addWidget(self.json_button)
         self.layout.addLayout(hbox)
+        aux_hbox = QtWidgets.QHBoxLayout()
+        aux_hbox.addWidget(self.image_selector)
+        aux_hbox.addWidget(self.json_button)
+        self.layout.addLayout(aux_hbox)
         self.setLayout(self.layout)
 
         # interactions
@@ -257,10 +261,11 @@ class LabelWidget(QtWidgets.QWidget):
         self.back_button.clicked.connect(self.last_image)
         self.save_button.clicked.connect(self.save_dataset)
         self.json_button.clicked.connect(self.print_json)
+        self.image_selector.currentIndexChanged.connect(self.goto_image)
         self.image_widget.mousePressEvent = self.image_click
     
     def save_dataset(self):
-        self.save_current_labels()
+        self.cache_current_labels()
         json.dump(self.dataset.to_json(), self.dataset_fpath.open("w"))
         logger.info(f"Saved dataset with {len(self.dataset)} labeled images to {self.dataset_fpath}.")
     
@@ -336,7 +341,7 @@ class LabelWidget(QtWidgets.QWidget):
         self.person_selector.clear()
         self.person_selector.addItems([str(i) for i in range(len(self.image_widget.persons))])
     
-    def save_current_labels(self):
+    def cache_current_labels(self):
         if self.current_image_fpath is not None:
             labeled_persons = [p for p in self.image_widget.persons if len(p) > 0]
             num_labeled_persons = len(labeled_persons)
@@ -344,13 +349,10 @@ class LabelWidget(QtWidgets.QWidget):
                 image_fname = self.current_image_fpath.name
                 logger.info(f"Adding {num_labeled_persons} labeled persons for {image_fname} to cache.")
                 self.dataset[image_fname] = Persons(labeled_persons)
-
-    def jump_image(self, jump):
-        self.save_current_labels()
-        if self.current_image_idx is None:
-            self.current_image_idx = 0
-        else:
-            self.current_image_idx += jump
+    
+    def goto_image(self, image_idx):
+        self.cache_current_labels()
+        self.current_image_idx = image_idx
         self.current_image_fpath = self.image_fpaths[self.current_image_idx]
         persons = self.dataset.get(self.current_image_fpath.name)
         if self.image_widget is None:
@@ -362,6 +364,13 @@ class LabelWidget(QtWidgets.QWidget):
         self.refresh_person_selector()
         self.update_image_widget()
         self.keypoint_buttons[0].setChecked(True)
+
+    def jump_image(self, jump):        
+        if self.current_image_idx is None:
+            new_image_idx = 0
+        else:
+            new_image_idx = self.current_image_idx + jump
+        self.goto_image(new_image_idx)        
     
     def next_image(self):
         self.jump_image(1)
