@@ -6,7 +6,9 @@ import logging
 from pathlib import Path
 import sys
 from typing import List
+import pprint
 
+import numpy as np
 from PySide2 import QtCore, QtWidgets, QtGui
 
 kpt_alpha = 200
@@ -18,6 +20,22 @@ KeypointPosition = collections.namedtuple("KeypointPosition", "x y")
 
 
 class LabeledPerson:
+    keypoint_names = [
+        "nose",
+        "left_shoulder",
+        "right_shoulder",
+        "left_elbow",
+        "right_elbow",
+        "left_wrist",
+        "right_wrist",
+        "left_hip",
+        "right_hip",
+        "left_knee",
+        "right_knee",
+        "club_head",
+        "shaft_center",
+        "ball"
+    ]  # in order
     keypoints = {
         "clubhead": {"color": QtGui.QColor(255, 0, 0, kpt_alpha), "short": "CH"}, 
         "shaftcenter": {"color": QtGui.QColor(0, 0, 255, kpt_alpha), "short": "SC"}, 
@@ -35,6 +53,7 @@ class LabeledPerson:
         "right_knee": {"color": QtGui.QColor(0, 0, 0, kpt_alpha), "short": "RK"}, 
     }
     names = list(keypoints.keys())
+    assert len(names) == len(keypoint_names), f"{len(names)} vs {len(keypoints)}"
 
     def __init__(self, labels=None):
         self.labels = labels or {}
@@ -58,6 +77,19 @@ class LabeledPerson:
     
     def to_json(self):
         return {n: [p.x, p.y] for n, p in self.items()}
+    
+    def to_arrays(self):
+        """COCO style."""
+        num_kpts = len(self.names)
+        v = np.zeros((num_kpts,), dtype=np.uint32)
+        xy = np.zeros((num_kpts * 2,), dtype=np.uint32)
+        for i, name in enumerate(self.names):
+            pos = self.labels.get(name)
+            if pos is not None:
+                v[i] = 2
+                xy[i*2] = pos.x
+                xy[i*2 + 1] = pos.y
+        return v, xy
     
     @classmethod
     def from_json(cls, data):
@@ -192,6 +224,7 @@ class LabelWidget(QtWidgets.QWidget):
         self.clear_button = QtWidgets.QPushButton("clear")
         self.next_button = QtWidgets.QPushButton("next")
         self.back_button = QtWidgets.QPushButton("back")
+        self.json_button = QtWidgets.QPushButton("json")
         self.keypoint_buttons = [QtWidgets.QRadioButton(n) for n in LabeledPerson.names]
         self.person_selector = QtWidgets.QComboBox()
         self.image_widget = None
@@ -211,6 +244,7 @@ class LabelWidget(QtWidgets.QWidget):
         hbox.addWidget(self.next_button)
         hbox.addWidget(self.save_button)
         hbox.addWidget(self.clear_button)
+        hbox.addWidget(self.json_button)
         self.layout.addLayout(hbox)
         self.setLayout(self.layout)
 
@@ -222,6 +256,7 @@ class LabelWidget(QtWidgets.QWidget):
         self.next_button.clicked.connect(self.next_image)
         self.back_button.clicked.connect(self.last_image)
         self.save_button.clicked.connect(self.save_dataset)
+        self.json_button.clicked.connect(self.print_json)
         self.image_widget.mousePressEvent = self.image_click
     
     def save_dataset(self):
@@ -336,6 +371,18 @@ class LabelWidget(QtWidgets.QWidget):
             logger.warning(f"current_image_idx={self.current_image_idx}, nothing to go back to")
             return
         self.jump_image(-1)
+    
+    def print_json(self, event):
+        idx = self.person_selector.currentIndex()
+        v, xy = self.image_widget.persons[idx].to_arrays()
+        data = {
+            "imageAssetPath": self.current_image_fpath.name,
+            "annotation": {
+                "v": v.tolist(),
+                "xy": xy.tolist()
+            }
+        }
+        pprint.PrettyPrinter(indent=2, width=180).pprint(data)
 
 
 def main():
