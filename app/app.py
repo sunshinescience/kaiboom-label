@@ -83,7 +83,7 @@ class LabeledPerson:
         num_kpts = len(self.names)
         v = np.zeros((num_kpts,), dtype=np.uint32)
         xy = np.zeros((num_kpts * 2,), dtype=np.uint32)
-        for i, name in enumerate(self.names):
+        for i, name in enumerate(self.keypoint_names):
             pos = self.labels.get(name)
             if pos is not None:
                 v[i] = 2
@@ -212,7 +212,7 @@ class LabelWidget(QtWidgets.QWidget):
         except FileNotFoundError:
             logger.info("Created new dataset.")
             self.dataset = Dataset()
-        self.image_fpaths = list(self.data_dir.glob("*.png"))
+        self.image_fpaths = sorted(list(self.data_dir.glob("*.png")), key=lambda p: p.name)
         self.current_image_idx = None
         self.current_image_fpath = None
 
