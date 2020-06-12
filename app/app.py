@@ -6,10 +6,12 @@ import logging
 from pathlib import Path
 import sys
 from typing import List
+import os
 import pprint
 
 import numpy as np
 from PySide2 import QtCore, QtWidgets, QtGui
+import fire
 
 kpt_alpha = 200
 logger = logging.getLogger("app")
@@ -394,9 +396,9 @@ class LabelWidget(QtWidgets.QWidget):
         pprint.PrettyPrinter(indent=2, width=180).pprint(data)
 
 
-def main():
+def main(cwd):
     app = QtWidgets.QApplication([])
-    img_dir = Path("/home/kaiboom/Pictures/golf")
+    img_dir = Path(cwd)
     widget = LabelWidget(img_dir)
     widget.resize(800, 600)
     widget.show()
@@ -405,4 +407,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    fire.Fire(main)
