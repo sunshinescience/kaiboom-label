@@ -155,6 +155,9 @@ class Dataset:
     def __len__(self):
         return len(self.data)
     
+    def __contains__(self, fname):
+        return fname in self.data
+    
     def get(self, img_fpath: str):
         return self.data.get(img_fpath)
 
@@ -225,6 +228,7 @@ class LabelWidget(QtWidgets.QWidget):
         self.save_button = QtWidgets.QPushButton("save")
         self.clear_button = QtWidgets.QPushButton("clear")
         self.next_button = QtWidgets.QPushButton("next")
+        self.nextunlabeled_button = QtWidgets.QPushButton("next unlabeled")
         self.back_button = QtWidgets.QPushButton("back")
         self.json_button = QtWidgets.QPushButton("json")
         self.keypoint_buttons = [QtWidgets.QRadioButton(n) for n in LabeledPerson.names]
@@ -250,6 +254,7 @@ class LabelWidget(QtWidgets.QWidget):
         self.layout.addLayout(hbox)
         aux_hbox = QtWidgets.QHBoxLayout()
         aux_hbox.addWidget(self.image_selector)
+        aux_hbox.addWidget(self.nextunlabeled_button)
         aux_hbox.addWidget(self.json_button)
         self.layout.addLayout(aux_hbox)
         self.setLayout(self.layout)
@@ -260,6 +265,7 @@ class LabelWidget(QtWidgets.QWidget):
         self.clear_button.clicked.connect(self.clear)
         self.pop_button.clicked.connect(self.pop)
         self.next_button.clicked.connect(self.next_image)
+        self.nextunlabeled_button.clicked.connect(self.nextunlabeled_image)
         self.back_button.clicked.connect(self.last_image)
         self.save_button.clicked.connect(self.save_dataset)
         self.json_button.clicked.connect(self.print_json)
@@ -382,6 +388,13 @@ class LabelWidget(QtWidgets.QWidget):
             logger.warning(f"current_image_idx={self.current_image_idx}, nothing to go back to")
             return
         self.jump_image(-1)
+    
+    def nextunlabeled_image(self):
+        for i in range(self.current_image_idx + 1, len(self.image_fpaths)):
+            if self.image_fpaths[i].name not in self.dataset:
+                self.goto_image(i)
+                return
+        logger.warning(f"Reached end of images, no more unlabeled ones.")
     
     def print_json(self, event):
         idx = self.person_selector.currentIndex()
