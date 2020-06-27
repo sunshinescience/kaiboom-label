@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 import collections
+import datetime
 import glob
 import json
 import logging
 from pathlib import Path
+import shutil
 import sys
 from typing import List
 import os
@@ -67,7 +69,7 @@ class LabeledPerson:
         return self.labels.items()
     
     def __setitem__(self, name: str, pos: KeypointPosition):
-        logger.info(f"Label name={name} set to pos={pos}.")
+        logger.debug(f"Label name={name} set to pos={pos}.")
         assert name in self.names, name
         self.labels[name] = pos
     
@@ -160,6 +162,9 @@ class Dataset:
     
     def get(self, img_fpath: str):
         return self.data.get(img_fpath)
+    
+    def remove(self, img_fpath: str):
+        del self.data[img_fpath]
 
     def to_json(self):
         return {i: p.to_json() for i, p in self.data.items()}
@@ -209,11 +214,13 @@ class LabelWidget(QtWidgets.QWidget):
         super().__init__()
 
         # data
-        self.data_dir = data_dir
-        self.dataset_fpath = Path(data_dir) / "dataset.json"
+        self.data_dir = Path(data_dir)
+        self.dataset_fpath = data_dir / "dataset.json"
+        self.stache_dir = data_dir / "stached"
+        self.stache_dir.mkdir(exist_ok=True)
         try:
             self.dataset = Dataset.from_json(json.load(self.dataset_fpath.open()))
-            logger.info(f"Loaded dataset from {self.dataset_fpath} with {len(self.dataset)} labeled images.")
+            logger.info(f"Loaded dataset from {self.dataset_fpath} with {len(self.dataset)} labeled images at {datetime.datetime.now()}.")
         except FileNotFoundError:
             logger.info("Created new dataset.")
             self.dataset = Dataset()
@@ -227,6 +234,7 @@ class LabelWidget(QtWidgets.QWidget):
         self.pop_button = QtWidgets.QPushButton("pop")
         self.save_button = QtWidgets.QPushButton("save")
         self.clear_button = QtWidgets.QPushButton("clear")
+        self.stache_button = QtWidgets.QPushButton("stache")
         self.next_button = QtWidgets.QPushButton("next")
         self.nextunlabeled_button = QtWidgets.QPushButton("next unlabeled")
         self.back_button = QtWidgets.QPushButton("back")
@@ -256,6 +264,7 @@ class LabelWidget(QtWidgets.QWidget):
         aux_hbox.addWidget(self.image_selector)
         aux_hbox.addWidget(self.nextunlabeled_button)
         aux_hbox.addWidget(self.json_button)
+        aux_hbox.addWidget(self.stache_button)
         self.layout.addLayout(aux_hbox)
         self.setLayout(self.layout)
 
@@ -269,13 +278,14 @@ class LabelWidget(QtWidgets.QWidget):
         self.back_button.clicked.connect(self.last_image)
         self.save_button.clicked.connect(self.save_dataset)
         self.json_button.clicked.connect(self.print_json)
+        self.stache_button.clicked.connect(self.stache_img)
         self.image_selector.currentIndexChanged.connect(self.goto_image)
         self.image_widget.mousePressEvent = self.image_click
     
     def save_dataset(self):
         self.cache_current_labels()
         json.dump(self.dataset.to_json(), self.dataset_fpath.open("w"))
-        logger.info(f"Saved dataset with {len(self.dataset)} labeled images to {self.dataset_fpath}.")
+        logger.info(f"Saved dataset to {self.dataset_fpath} with {len(self.dataset)} labeled images at {datetime.datetime.now()}.")
     
     def select_next_kpt_button(self, i=None):
         if i is not None:
@@ -302,6 +312,17 @@ class LabelWidget(QtWidgets.QWidget):
                 self.image_widget.persons.active_person[b.text()] = pos
         self.update_image_widget()
         self.select_next_kpt_button()
+    
+    def stache_img(self, event):
+        logger.info(f"Staching image {self.current_image_fpath.name}")
+        trgPath = self.stache_dir / self.current_image_fpath.name
+        shutil.move(self.current_image_fpath, trgPath)
+        del self.image_fpaths[self.current_image_idx]
+        try:
+            self.dataset.remove(self.current_image_fpath.name)
+        except KeyError:
+            logger.debug("No labels for stached image.")
+        self.goto_image()
     
     def add_person(self, event):
         idx = self.image_widget.persons.new()
@@ -355,10 +376,12 @@ class LabelWidget(QtWidgets.QWidget):
             num_labeled_persons = len(labeled_persons)
             if num_labeled_persons > 0:
                 image_fname = self.current_image_fpath.name
-                logger.info(f"Adding {num_labeled_persons} labeled persons for {image_fname} to cache.")
+                logger.debug(f"Adding {num_labeled_persons} labeled persons for {image_fname} to cache.")
                 self.dataset[image_fname] = Persons(labeled_persons)
     
-    def goto_image(self, image_idx):
+    def goto_image(self, image_idx=None):
+        if image_idx is None:
+            image_idx = self.current_image_idx
         self.cache_current_labels()
         self.current_image_idx = image_idx
         self.current_image_fpath = self.image_fpaths[self.current_image_idx]
