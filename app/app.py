@@ -224,7 +224,10 @@ class LabelWidget(QtWidgets.QWidget):
         except FileNotFoundError:
             logger.info("Created new dataset.")
             self.dataset = Dataset()
-        self.image_fpaths = sorted(list(self.data_dir.glob("*.png")), key=lambda p: p.name)
+        self.image_fpaths = []
+        for e in ("*.png", "*.bmp", "*.JPG", "*.jpg"):
+            self.image_fpaths.extend(self.data_dir.glob(e))
+        self.image_fpaths = sorted(list(self.image_fpaths), key=lambda p: p.name)
         self.current_image_idx = None
         self.current_image_fpath = None
 
